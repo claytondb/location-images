@@ -1,10 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import ImageGrid from '@/components/ImageGrid';
 import Timeline from '@/components/Timeline';
 import SearchForm from '@/components/SearchForm';
 import SourceFilters from '@/components/SourceFilters';
+
+// Dynamic import for 3D view (Three.js needs client-side only)
+const View3D = dynamic(() => import('@/components/View3D'), { 
+  ssr: false,
+  loading: () => <div className="h-[600px] bg-[var(--card)] rounded-lg flex items-center justify-center">Loading 3D view...</div>
+});
 
 export interface ImageResult {
   id: string;
@@ -36,7 +43,10 @@ const SOURCE_LABELS: Record<ImageSource, string> = {
   maps: 'Historical Maps',
 };
 
-type ViewMode = 'grid' | 'timeline';
+type ViewMode = 'grid' | 'timeline' | '3d';
+
+const RECENT_SEARCHES_KEY = 'locationspy-recent-searches';
+const MAX_RECENT_SEARCHES = 5;
 
 export default function Home() {
   const [images, setImages] = useState<ImageResult[]>([]);
@@ -50,6 +60,22 @@ export default function Home() {
   const [geoRadius, setGeoRadius] = useState(10); // km
   const [photosOnly, setPhotosOnly] = useState(true);
   const [usedCoordinates, setUsedCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  // Load recent searches from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(RECENT_SEARCHES_KEY);
+    if (saved) {
+      setRecentSearches(JSON.parse(saved));
+    }
+  }, []);
+
+  // Save a search to recent searches
+  const addRecentSearch = (location: string) => {
+    const updated = [location, ...recentSearches.filter(s => s !== location)].slice(0, MAX_RECENT_SEARCHES);
+    setRecentSearches(updated);
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(updated));
+  };
 
   const handleSearch = async (location: string, coordinates?: { lat: number; lng: number }) => {
     setLoading(true);
@@ -57,6 +83,7 @@ export default function Home() {
     setImages([]);
     setSearchedLocation(location);
     setUsedCoordinates(null);
+    addRecentSearch(location);
 
     try {
       const params = new URLSearchParams({
@@ -131,8 +158,24 @@ export default function Home() {
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Search Section */}
-        <div className="mb-8">
+        <div className="mb-6">
           <SearchForm onSearch={handleSearch} loading={loading} />
+          
+          {/* Recent Searches */}
+          {recentSearches.length > 0 && (
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              <span className="text-sm text-[var(--muted)]">Recent:</span>
+              {recentSearches.map((search, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSearch(search)}
+                  className="text-sm px-3 py-1 bg-[var(--card)] border border-[var(--border)] rounded-full hover:border-[var(--accent)] transition-colors"
+                >
+                  {search}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Source Filters */}
@@ -259,6 +302,16 @@ export default function Home() {
                   >
                     📅 Timeline
                   </button>
+                  <button
+                    onClick={() => setViewMode('3d')}
+                    className={`px-3 py-1.5 rounded text-sm transition-all ${
+                      viewMode === '3d'
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'text-[var(--muted)] hover:text-white'
+                    }`}
+                  >
+                    🌐 3D
+                  </button>
                 </div>
               </div>
             </div>
@@ -303,10 +356,12 @@ export default function Home() {
             </div>
 
             {/* Image Display */}
-            {viewMode === 'grid' ? (
-              <ImageGrid images={filteredImages} />
-            ) : (
-              <Timeline images={filteredImages} />
+            {viewMode === 'grid' && <ImageGrid images={filteredImages} />}
+            {viewMode === 'timeline' && <Timeline images={filteredImages} />}
+            {viewMode === '3d' && (
+              <Suspense fallback={<div className="h-[600px] bg-[var(--card)] rounded-lg flex items-center justify-center">Loading 3D view...</div>}>
+                <View3D images={filteredImages} centerCoordinates={usedCoordinates || undefined} />
+              </Suspense>
             )}
           </div>
         )}
