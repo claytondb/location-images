@@ -14,6 +14,11 @@ const SOURCE_COLORS: Record<string, string> = {
   unsplash: 'bg-gray-500',
   zillow: 'bg-blue-600',
   redfin: 'bg-red-500',
+  loc: 'bg-amber-600',
+  wikimedia: 'bg-green-600',
+  archive: 'bg-orange-600',
+  nypl: 'bg-purple-600',
+  maps: 'bg-yellow-600',
 };
 
 export default function ImageGrid({ images }: ImageGridProps) {
@@ -73,6 +78,20 @@ export default function ImageGrid({ images }: ImageGridProps) {
             <div className={`absolute top-2 right-2 px-2 py-1 rounded text-xs text-white ${SOURCE_COLORS[image.source] || 'bg-gray-500'}`}>
               {image.source}
             </div>
+
+            {/* Year Badge */}
+            {image.year && (
+              <div className="absolute top-2 left-2 px-2 py-1 rounded text-xs bg-black/70 text-amber-400 font-medium">
+                {image.year}
+              </div>
+            )}
+
+            {/* Historical indicator */}
+            {image.isHistorical && (
+              <div className="absolute bottom-2 left-2 px-2 py-1 rounded text-[10px] bg-amber-900/80 text-amber-300">
+                📜 Historical
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -103,6 +122,15 @@ export default function ImageGrid({ images }: ImageGridProps) {
                 <div className="flex items-center gap-2 mt-1 text-sm text-[var(--muted)]">
                   <span className={`w-2 h-2 rounded-full ${SOURCE_COLORS[selectedImage.source] || 'bg-gray-500'}`} />
                   <span>{selectedImage.source}</span>
+                  {selectedImage.year && (
+                    <>
+                      <span>•</span>
+                      <span className="text-amber-400 font-medium">{selectedImage.year}</span>
+                    </>
+                  )}
+                  {selectedImage.isHistorical && (
+                    <span className="px-2 py-0.5 bg-amber-900/50 text-amber-400 rounded text-xs">Historical</span>
+                  )}
                   {selectedImage.width && selectedImage.height && (
                     <span>• {selectedImage.width}x{selectedImage.height}</span>
                   )}

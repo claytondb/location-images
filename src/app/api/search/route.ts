@@ -10,6 +10,9 @@ interface ImageResult {
   sourceUrl: string;
   width?: number;
   height?: number;
+  year?: number;
+  date?: string;
+  isHistorical?: boolean;
 }
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -381,10 +384,271 @@ async function scrapeRedfin(query: string): Promise<ImageResult[]> {
   }
 }
 
+// Scrape Library of Congress
+async function scrapeLibraryOfCongress(query: string): Promise<ImageResult[]> {
+  try {
+    const searchUrl = `https://www.loc.gov/pictures/search/?q=${encodeURIComponent(query)}&fo=json&c=20`;
+    
+    const res = await fetch(searchUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const data = await res.json();
+    const images: ImageResult[] = [];
+
+    if (data.results) {
+      for (const item of data.results.slice(0, 12)) {
+        const imageUrl = item.image?.full || item.image?.thumb;
+        if (imageUrl) {
+          // Extract year from date field
+          let year: number | undefined;
+          if (item.date) {
+            const yearMatch = item.date.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+            if (yearMatch) year = parseInt(yearMatch[1]);
+          }
+          
+          images.push({
+            id: `loc-${item.pk}-${Date.now()}`,
+            url: imageUrl.startsWith('//') ? `https:${imageUrl}` : imageUrl,
+            thumbnail: item.image?.thumb ? (item.image.thumb.startsWith('//') ? `https:${item.image.thumb}` : item.image.thumb) : imageUrl,
+            title: item.title || `${query} - Historical`,
+            source: 'loc',
+            sourceUrl: `https://www.loc.gov${item.link || ''}`,
+            year,
+            date: item.date,
+            isHistorical: true,
+          });
+        }
+      }
+    }
+
+    return images;
+  } catch (error) {
+    console.error('Library of Congress scrape failed:', error);
+    return [];
+  }
+}
+
+// Scrape Wikimedia Commons
+async function scrapeWikimediaCommons(query: string): Promise<ImageResult[]> {
+  try {
+    const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=6&srlimit=15&format=json&origin=*`;
+    
+    const res = await fetch(searchUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const data = await res.json();
+    const images: ImageResult[] = [];
+
+    if (data.query?.search) {
+      for (const item of data.query.search) {
+        const title = item.title;
+        // Get actual image URL
+        const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=imageinfo&iiprop=url|extmetadata&format=json&origin=*`;
+        
+        try {
+          const infoRes = await fetch(infoUrl, { headers: { 'User-Agent': USER_AGENT } });
+          const infoData = await infoRes.json();
+          const pages = infoData.query?.pages;
+          
+          if (pages) {
+            const page = Object.values(pages)[0] as Record<string, unknown>;
+            const imageinfo = (page.imageinfo as Record<string, unknown>[])?.[0];
+            
+            if (imageinfo?.url) {
+              const extmeta = imageinfo.extmetadata as Record<string, { value: string }> | undefined;
+              let year: number | undefined;
+              let dateStr: string | undefined;
+              
+              // Try to get date from metadata
+              if (extmeta?.DateTimeOriginal?.value) {
+                dateStr = extmeta.DateTimeOriginal.value;
+                const yearMatch = dateStr.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+                if (yearMatch) year = parseInt(yearMatch[1]);
+              } else if (extmeta?.DateTime?.value) {
+                dateStr = extmeta.DateTime.value;
+                const yearMatch = dateStr.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+                if (yearMatch) year = parseInt(yearMatch[1]);
+              }
+
+              // Check if it's historical (before 2000)
+              const isHistorical = year ? year < 2000 : false;
+
+              images.push({
+                id: `wikimedia-${images.length}-${Date.now()}`,
+                url: imageinfo.url as string,
+                thumbnail: (imageinfo.url as string).replace(/\/([^/]+)$/, '/thumb/$1/400px-$1'),
+                title: title.replace('File:', '').replace(/\.[^.]+$/, ''),
+                source: 'wikimedia',
+                sourceUrl: `https://commons.wikimedia.org/wiki/${encodeURIComponent(title)}`,
+                year,
+                date: dateStr,
+                isHistorical,
+              });
+            }
+          }
+        } catch {}
+      }
+    }
+
+    return images.slice(0, 10);
+  } catch (error) {
+    console.error('Wikimedia Commons scrape failed:', error);
+    return [];
+  }
+}
+
+// Scrape Internet Archive
+async function scrapeInternetArchive(query: string): Promise<ImageResult[]> {
+  try {
+    const searchUrl = `https://archive.org/advancedsearch.php?q=${encodeURIComponent(query)}+mediatype:image&output=json&rows=15&fl[]=identifier,title,date,year`;
+    
+    const res = await fetch(searchUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const data = await res.json();
+    const images: ImageResult[] = [];
+
+    if (data.response?.docs) {
+      for (const item of data.response.docs) {
+        const identifier = item.identifier;
+        // Internet Archive image URL pattern
+        const imageUrl = `https://archive.org/download/${identifier}/__ia_thumb.jpg`;
+        const fullUrl = `https://archive.org/download/${identifier}/${identifier}.jpg`;
+        
+        let year: number | undefined;
+        if (item.year) {
+          year = parseInt(item.year);
+        } else if (item.date) {
+          const yearMatch = item.date.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+          if (yearMatch) year = parseInt(yearMatch[1]);
+        }
+
+        images.push({
+          id: `archive-${identifier}-${Date.now()}`,
+          url: fullUrl,
+          thumbnail: imageUrl,
+          title: item.title || `${query} - Archive`,
+          source: 'archive',
+          sourceUrl: `https://archive.org/details/${identifier}`,
+          year,
+          date: item.date,
+          isHistorical: true,
+        });
+      }
+    }
+
+    return images;
+  } catch (error) {
+    console.error('Internet Archive scrape failed:', error);
+    return [];
+  }
+}
+
+// Scrape NYPL Digital Collections
+async function scrapeNYPL(query: string): Promise<ImageResult[]> {
+  try {
+    const searchUrl = `https://api.repo.nypl.org/api/v2/items/search?q=${encodeURIComponent(query)}&per_page=12&page=1`;
+    
+    // NYPL API requires a token, so we'll scrape the public site instead
+    const publicUrl = `https://digitalcollections.nypl.org/search/index?utf8=%E2%9C%93&keywords=${encodeURIComponent(query)}`;
+    
+    const res = await fetch(publicUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    $('.result-item, .search-result').each((i, el) => {
+      if (i >= 12) return false;
+      
+      const img = $(el).find('img').first();
+      const link = $(el).find('a').first();
+      const src = img.attr('src') || img.attr('data-src');
+      
+      if (src) {
+        // Try to extract date from the item
+        const text = $(el).text();
+        let year: number | undefined;
+        const yearMatch = text.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+        if (yearMatch) year = parseInt(yearMatch[1]);
+
+        images.push({
+          id: `nypl-${i}-${Date.now()}`,
+          url: src.replace('_s.jpg', '_g.jpg').replace('/t/', '/b/'),
+          thumbnail: src,
+          title: img.attr('alt') || link.text()?.trim() || `${query} - NYPL`,
+          source: 'nypl',
+          sourceUrl: link.attr('href') ? `https://digitalcollections.nypl.org${link.attr('href')}` : publicUrl,
+          year,
+          isHistorical: true,
+        });
+      }
+    });
+
+    return images;
+  } catch (error) {
+    console.error('NYPL scrape failed:', error);
+    return [];
+  }
+}
+
+// Scrape Old Maps/Historical imagery
+async function scrapeHistoricalMaps(query: string): Promise<ImageResult[]> {
+  try {
+    // David Rumsey Map Collection
+    const searchUrl = `https://www.davidrumsey.com/luna/servlet/as/search?q=${encodeURIComponent(query)}&sort=Pub_Date%2CList_No&lc=RUMSEY~8~1&search=Search`;
+    
+    const res = await fetch(searchUrl, {
+      headers: { 'User-Agent': USER_AGENT },
+    });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    // Parse search results
+    $('img[src*="Size0"]').each((i, el) => {
+      if (i >= 8) return false;
+      
+      const src = $(el).attr('src');
+      if (src) {
+        const largeSrc = src.replace('Size0', 'Size2');
+        const title = $(el).attr('alt') || $(el).attr('title') || `${query} - Historical Map`;
+        
+        // Extract year from title or nearby text
+        let year: number | undefined;
+        const yearMatch = title.match(/\b(1[0-9]{3}|20[0-2][0-9])\b/);
+        if (yearMatch) year = parseInt(yearMatch[1]);
+
+        images.push({
+          id: `map-${i}-${Date.now()}`,
+          url: largeSrc,
+          thumbnail: src,
+          title: title,
+          source: 'maps',
+          sourceUrl: searchUrl,
+          year,
+          isHistorical: true,
+        });
+      }
+    });
+
+    return images;
+  } catch (error) {
+    console.error('Historical maps scrape failed:', error);
+    return [];
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const location = searchParams.get('location');
-  const sourcesParam = searchParams.get('sources') || 'google,bing,flickr,unsplash';
+  const sourcesParam = searchParams.get('sources') || 'google,bing,flickr,unsplash,loc,wikimedia,archive';
 
   if (!location) {
     return NextResponse.json({ error: 'Location is required' }, { status: 400 });
@@ -411,6 +675,21 @@ export async function GET(request: Request) {
   }
   if (sources.includes('redfin')) {
     searchPromises.push(scrapeRedfin(location));
+  }
+  if (sources.includes('loc')) {
+    searchPromises.push(scrapeLibraryOfCongress(location));
+  }
+  if (sources.includes('wikimedia')) {
+    searchPromises.push(scrapeWikimediaCommons(location));
+  }
+  if (sources.includes('archive')) {
+    searchPromises.push(scrapeInternetArchive(location));
+  }
+  if (sources.includes('nypl')) {
+    searchPromises.push(scrapeNYPL(location));
+  }
+  if (sources.includes('maps')) {
+    searchPromises.push(scrapeHistoricalMaps(location));
   }
 
   try {
