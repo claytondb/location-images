@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as cheerio from 'cheerio';
 
 interface ImageResult {
   id: string;
@@ -11,193 +12,379 @@ interface ImageResult {
   height?: number;
 }
 
-// Search Unsplash (free, no API key required for demo)
-async function searchUnsplash(query: string): Promise<ImageResult[]> {
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Scrape Google Images
+async function scrapeGoogleImages(query: string): Promise<ImageResult[]> {
   try {
-    // Using Unsplash Source for demo (no API key needed)
-    // In production, use the official API with an access key
-    const images: ImageResult[] = [];
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=isch&safe=active`;
     
-    // Generate placeholder results from Unsplash Source
-    for (let i = 0; i < 10; i++) {
-      const seed = `${query}-${i}`;
-      images.push({
-        id: `unsplash-${seed}`,
-        url: `https://source.unsplash.com/800x600/?${encodeURIComponent(query)}&sig=${i}`,
-        thumbnail: `https://source.unsplash.com/400x300/?${encodeURIComponent(query)}&sig=${i}`,
-        title: `${query} - Unsplash Photo ${i + 1}`,
-        source: 'unsplash',
-        sourceUrl: `https://unsplash.com/s/photos/${encodeURIComponent(query)}`,
-        width: 800,
-        height: 600,
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
+    });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    // Google embeds image data in scripts
+    const scripts = $('script').toArray();
+    for (const script of scripts) {
+      const content = $(script).html() || '';
+      // Look for image URLs in the script content
+      const urlMatches = content.match(/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/gi);
+      if (urlMatches) {
+        for (const match of urlMatches.slice(0, 15)) {
+          const url = match.slice(2, -1); // Remove [" and "
+          if (url.includes('gstatic.com') || url.includes('google.com')) continue;
+          if (url.length > 500) continue; // Skip data URIs
+          
+          images.push({
+            id: `google-${images.length}-${Date.now()}`,
+            url: url,
+            thumbnail: url,
+            title: `${query} - Image ${images.length + 1}`,
+            source: 'google',
+            sourceUrl: searchUrl,
+          });
+        }
+      }
+    }
+
+    return images.slice(0, 12);
+  } catch (error) {
+    console.error('Google scrape failed:', error);
+    return [];
+  }
+}
+
+// Scrape Bing Images
+async function scrapeBingImages(query: string): Promise<ImageResult[]> {
+  try {
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query)}&safeSearch=Strict`;
+    
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      },
+    });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    // Bing uses data attributes on image elements
+    $('a.iusc').each((i, el) => {
+      if (i >= 12) return false;
+      
+      const m = $(el).attr('m');
+      if (m) {
+        try {
+          const data = JSON.parse(m);
+          if (data.murl) {
+            images.push({
+              id: `bing-${i}-${Date.now()}`,
+              url: data.murl,
+              thumbnail: data.turl || data.murl,
+              title: data.t || `${query} - Image ${i + 1}`,
+              source: 'bing',
+              sourceUrl: data.purl || searchUrl,
+            });
+          }
+        } catch {}
+      }
+    });
+
+    // Fallback: look for img tags
+    if (images.length === 0) {
+      $('img.mimg').each((i, el) => {
+        if (i >= 12) return false;
+        const src = $(el).attr('src') || $(el).attr('data-src');
+        if (src && !src.startsWith('data:')) {
+          images.push({
+            id: `bing-${i}-${Date.now()}`,
+            url: src,
+            thumbnail: src,
+            title: $(el).attr('alt') || `${query} - Image ${i + 1}`,
+            source: 'bing',
+            sourceUrl: searchUrl,
+          });
+        }
       });
     }
-    
+
     return images;
   } catch (error) {
-    console.error('Unsplash search failed:', error);
+    console.error('Bing scrape failed:', error);
     return [];
   }
 }
 
-// Search Flickr (public API, no key required for basic search)
-async function searchFlickr(query: string, lat?: number, lng?: number): Promise<ImageResult[]> {
+// Scrape Flickr (public search page)
+async function scrapeFlickr(query: string): Promise<ImageResult[]> {
   try {
-    const params = new URLSearchParams({
-      method: 'flickr.photos.search',
-      api_key: process.env.FLICKR_API_KEY || 'demo',
-      text: query,
-      safe_search: '1', // Safe search
-      content_type: '1', // Photos only
-      media: 'photos',
-      per_page: '20',
-      format: 'json',
-      nojsoncallback: '1',
-      extras: 'url_m,url_l,url_o',
+    const searchUrl = `https://www.flickr.com/search/?text=${encodeURIComponent(query)}&safe_search=1`;
+    
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+      },
     });
 
-    if (lat && lng) {
-      params.set('lat', lat.toString());
-      params.set('lon', lng.toString());
-      params.set('radius', '10'); // 10km radius
-    }
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
 
-    // If no API key, return demo results
-    if (!process.env.FLICKR_API_KEY) {
-      return generateDemoResults(query, 'flickr', 8);
-    }
-
-    const res = await fetch(`https://api.flickr.com/services/rest/?${params}`);
-    const data = await res.json();
-
-    if (!data.photos?.photo) return [];
-
-    return data.photos.photo.map((photo: Record<string, string>) => ({
-      id: `flickr-${photo.id}`,
-      url: photo.url_l || photo.url_m || `https://live.staticflickr.com/${photo.server}/${photo.id}_${photo.secret}_b.jpg`,
-      thumbnail: photo.url_m || `https://live.staticflickr.com/${photo.server}/${photo.id}_${photo.secret}_m.jpg`,
-      title: photo.title || `Photo from ${query}`,
-      source: 'flickr',
-      sourceUrl: `https://www.flickr.com/photos/${photo.owner}/${photo.id}`,
-    }));
-  } catch (error) {
-    console.error('Flickr search failed:', error);
-    return generateDemoResults(query, 'flickr', 5);
-  }
-}
-
-// Search Bing Images (requires API key)
-async function searchBing(query: string): Promise<ImageResult[]> {
-  if (!process.env.BING_SEARCH_KEY) {
-    return generateDemoResults(query, 'bing', 8);
-  }
-
-  try {
-    const res = await fetch(
-      `https://api.bing.microsoft.com/v7.0/images/search?q=${encodeURIComponent(query)}&count=20&safeSearch=Strict`,
-      {
-        headers: {
-          'Ocp-Apim-Subscription-Key': process.env.BING_SEARCH_KEY,
-        },
+    // Flickr embeds photo data in a script
+    const scripts = $('script').toArray();
+    for (const script of scripts) {
+      const content = $(script).html() || '';
+      if (content.includes('modelExport')) {
+        // Extract photo URLs from the model
+        const photoMatches = content.match(/"url":"(https:\/\/live\.staticflickr\.com\/[^"]+)"/g);
+        if (photoMatches) {
+          for (let i = 0; i < Math.min(photoMatches.length, 12); i++) {
+            const url = photoMatches[i].match(/"url":"([^"]+)"/)?.[1];
+            if (url) {
+              // Convert to larger size
+              const largeUrl = url.replace(/_[a-z]\.jpg$/, '_b.jpg');
+              images.push({
+                id: `flickr-${i}-${Date.now()}`,
+                url: largeUrl,
+                thumbnail: url,
+                title: `${query} - Flickr Photo ${i + 1}`,
+                source: 'flickr',
+                sourceUrl: searchUrl,
+              });
+            }
+          }
+        }
+        break;
       }
-    );
+    }
 
-    const data = await res.json();
-    
-    if (!data.value) return [];
-
-    return data.value.map((img: Record<string, unknown>) => ({
-      id: `bing-${img.imageId || Math.random().toString(36)}`,
-      url: img.contentUrl as string,
-      thumbnail: img.thumbnailUrl as string,
-      title: img.name as string,
-      source: 'bing',
-      sourceUrl: img.hostPageUrl as string,
-      width: img.width as number,
-      height: img.height as number,
-    }));
+    return images;
   } catch (error) {
-    console.error('Bing search failed:', error);
+    console.error('Flickr scrape failed:', error);
     return [];
   }
 }
 
-// Search Google Custom Search (requires API key)
-async function searchGoogle(query: string): Promise<ImageResult[]> {
-  if (!process.env.GOOGLE_SEARCH_KEY || !process.env.GOOGLE_SEARCH_CX) {
-    return generateDemoResults(query, 'google', 10);
-  }
-
+// Search Unsplash (their source URLs work without API)
+async function scrapeUnsplash(query: string): Promise<ImageResult[]> {
   try {
-    const params = new URLSearchParams({
-      key: process.env.GOOGLE_SEARCH_KEY,
-      cx: process.env.GOOGLE_SEARCH_CX,
-      q: query,
-      searchType: 'image',
-      safe: 'active',
-      num: '10',
+    const searchUrl = `https://unsplash.com/s/photos/${encodeURIComponent(query)}`;
+    
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+      },
     });
 
-    const res = await fetch(`https://www.googleapis.com/customsearch/v1?${params}`);
-    const data = await res.json();
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
 
-    if (!data.items) return [];
+    // Look for image elements
+    $('img[srcset]').each((i, el) => {
+      if (i >= 12) return false;
+      
+      const srcset = $(el).attr('srcset');
+      const alt = $(el).attr('alt') || query;
+      
+      if (srcset && srcset.includes('unsplash.com')) {
+        // Get the largest image from srcset
+        const urls = srcset.split(',').map(s => s.trim().split(' ')[0]);
+        const url = urls[urls.length - 1] || urls[0];
+        
+        if (url && !images.some(img => img.url === url)) {
+          images.push({
+            id: `unsplash-${i}-${Date.now()}`,
+            url: url,
+            thumbnail: urls[0] || url,
+            title: alt,
+            source: 'unsplash',
+            sourceUrl: searchUrl,
+          });
+        }
+      }
+    });
 
-    return data.items.map((item: Record<string, unknown>) => ({
-      id: `google-${Math.random().toString(36)}`,
-      url: item.link as string,
-      thumbnail: (item.image as Record<string, string>)?.thumbnailLink || item.link as string,
-      title: item.title as string,
-      source: 'google',
-      sourceUrl: (item.image as Record<string, string>)?.contextLink || '',
-      width: (item.image as Record<string, number>)?.width,
-      height: (item.image as Record<string, number>)?.height,
-    }));
+    // Fallback to source.unsplash if scraping didn't work
+    if (images.length === 0) {
+      for (let i = 0; i < 8; i++) {
+        images.push({
+          id: `unsplash-${i}-${Date.now()}`,
+          url: `https://source.unsplash.com/800x600/?${encodeURIComponent(query)}&sig=${i}`,
+          thumbnail: `https://source.unsplash.com/400x300/?${encodeURIComponent(query)}&sig=${i}`,
+          title: `${query} - Unsplash`,
+          source: 'unsplash',
+          sourceUrl: searchUrl,
+        });
+      }
+    }
+
+    return images;
   } catch (error) {
-    console.error('Google search failed:', error);
+    console.error('Unsplash scrape failed:', error);
     return [];
   }
 }
 
-// Generate demo results when API keys aren't configured
-function generateDemoResults(query: string, source: string, count: number): ImageResult[] {
-  const images: ImageResult[] = [];
-  const themes = ['house', 'building', 'street', 'neighborhood', 'architecture', 'property', 'home', 'exterior'];
-  
-  for (let i = 0; i < count; i++) {
-    const theme = themes[i % themes.length];
-    const width = 800 + (i % 3) * 100;
-    const height = 600 + (i % 4) * 50;
+// Scrape Zillow
+async function scrapeZillow(query: string): Promise<ImageResult[]> {
+  try {
+    // Search Zillow for the location
+    const searchUrl = `https://www.zillow.com/homes/${encodeURIComponent(query.replace(/\s+/g, '-'))}_rb/`;
     
-    images.push({
-      id: `${source}-demo-${i}-${Date.now()}`,
-      url: `https://picsum.photos/seed/${query}-${source}-${i}/${width}/${height}`,
-      thumbnail: `https://picsum.photos/seed/${query}-${source}-${i}/400/300`,
-      title: `${query} - ${theme} (Demo)`,
-      source,
-      sourceUrl: `https://picsum.photos`,
-      width,
-      height,
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      },
     });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    // Zillow embeds property data in scripts
+    $('script').each((i, el) => {
+      const content = $(el).html() || '';
+      if (content.includes('zpid') || content.includes('imgSrc')) {
+        // Look for image URLs
+        const imgMatches = content.match(/"imgSrc":"(https:\/\/[^"]+)"/g);
+        if (imgMatches) {
+          for (let j = 0; j < Math.min(imgMatches.length, 10); j++) {
+            const url = imgMatches[j].match(/"imgSrc":"([^"]+)"/)?.[1];
+            if (url) {
+              images.push({
+                id: `zillow-${j}-${Date.now()}`,
+                url: url.replace(/_[a-z]\.jpg/, '_f.jpg'), // Get full size
+                thumbnail: url,
+                title: `${query} - Zillow Property ${j + 1}`,
+                source: 'zillow',
+                sourceUrl: searchUrl,
+              });
+            }
+          }
+        }
+      }
+    });
+
+    // Also check for property cards
+    $('img[src*="zillowstatic.com"], img[src*="zillow.com"]').each((i, el) => {
+      if (images.length >= 12) return false;
+      const src = $(el).attr('src');
+      if (src && !src.includes('logo') && !src.includes('icon')) {
+        images.push({
+          id: `zillow-img-${i}-${Date.now()}`,
+          url: src,
+          thumbnail: src,
+          title: $(el).attr('alt') || `${query} - Zillow ${i + 1}`,
+          source: 'zillow',
+          sourceUrl: searchUrl,
+        });
+      }
+    });
+
+    return images.slice(0, 12);
+  } catch (error) {
+    console.error('Zillow scrape failed:', error);
+    return [];
   }
-  
-  return images;
 }
 
-// Zillow/Redfin would require web scraping or partnerships
-// For demo, we'll return placeholder results
-async function searchRealEstate(query: string, source: 'zillow' | 'redfin'): Promise<ImageResult[]> {
-  // In production, this would use web scraping or official APIs
-  // For now, return demo results
-  return generateDemoResults(query, source, 6);
+// Scrape Redfin
+async function scrapeRedfin(query: string): Promise<ImageResult[]> {
+  try {
+    // First, search for the location
+    const searchUrl = `https://www.redfin.com/stingray/do/location-autocomplete?v=2&location=${encodeURIComponent(query)}`;
+    
+    const searchRes = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+      },
+    });
+    
+    const searchText = await searchRes.text();
+    // Redfin returns {}&&{...} format
+    const jsonStr = searchText.replace(/^\{\}\&\&/, '');
+    
+    let regionUrl = `https://www.redfin.com/city/0/XX/${encodeURIComponent(query.replace(/\s+/g, '-'))}`;
+    
+    try {
+      const searchData = JSON.parse(jsonStr);
+      if (searchData.payload?.sections?.[0]?.rows?.[0]?.url) {
+        regionUrl = `https://www.redfin.com${searchData.payload.sections[0].rows[0].url}`;
+      }
+    } catch {}
+
+    const res = await fetch(regionUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+      },
+    });
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const images: ImageResult[] = [];
+
+    // Look for property images
+    $('img[src*="ssl.cdn-redfin.com"], img[src*="redfin.com"]').each((i, el) => {
+      if (images.length >= 12) return false;
+      const src = $(el).attr('src');
+      if (src && !src.includes('logo') && !src.includes('icon') && !src.includes('avatar')) {
+        // Get larger version
+        const largeSrc = src.replace(/\/genisys\./, '/bigphoto.').replace(/_[0-9]+\./, '_0.');
+        images.push({
+          id: `redfin-${i}-${Date.now()}`,
+          url: largeSrc,
+          thumbnail: src,
+          title: $(el).attr('alt') || `${query} - Redfin Property ${i + 1}`,
+          source: 'redfin',
+          sourceUrl: regionUrl,
+        });
+      }
+    });
+
+    // Also check script tags for image data
+    $('script').each((i, el) => {
+      const content = $(el).html() || '';
+      const imgMatches = content.match(/"(https:\/\/ssl\.cdn-redfin\.com\/photo[^"]+)"/g);
+      if (imgMatches) {
+        for (const match of imgMatches.slice(0, 10)) {
+          const url = match.slice(1, -1);
+          if (!images.some(img => img.url.includes(url.split('/').pop() || ''))) {
+            images.push({
+              id: `redfin-script-${images.length}-${Date.now()}`,
+              url: url,
+              thumbnail: url,
+              title: `${query} - Redfin Property`,
+              source: 'redfin',
+              sourceUrl: regionUrl,
+            });
+          }
+        }
+      }
+    });
+
+    return images.slice(0, 12);
+  } catch (error) {
+    console.error('Redfin scrape failed:', error);
+    return [];
+  }
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const location = searchParams.get('location');
   const sourcesParam = searchParams.get('sources') || 'google,bing,flickr,unsplash';
-  const lat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : undefined;
-  const lng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : undefined;
 
   if (!location) {
     return NextResponse.json({ error: 'Location is required' }, { status: 400 });
@@ -208,35 +395,44 @@ export async function GET(request: Request) {
 
   // Queue up searches for each source
   if (sources.includes('google')) {
-    searchPromises.push(searchGoogle(location));
+    searchPromises.push(scrapeGoogleImages(location));
   }
   if (sources.includes('bing')) {
-    searchPromises.push(searchBing(location));
+    searchPromises.push(scrapeBingImages(location));
   }
   if (sources.includes('flickr')) {
-    searchPromises.push(searchFlickr(location, lat, lng));
+    searchPromises.push(scrapeFlickr(location));
   }
   if (sources.includes('unsplash')) {
-    searchPromises.push(searchUnsplash(location));
+    searchPromises.push(scrapeUnsplash(location));
   }
   if (sources.includes('zillow')) {
-    searchPromises.push(searchRealEstate(location, 'zillow'));
+    searchPromises.push(scrapeZillow(location));
   }
   if (sources.includes('redfin')) {
-    searchPromises.push(searchRealEstate(location, 'redfin'));
+    searchPromises.push(scrapeRedfin(location));
   }
 
   try {
     const results = await Promise.all(searchPromises);
     const allImages = results.flat();
 
+    // Remove duplicates based on URL
+    const seen = new Set<string>();
+    const uniqueImages = allImages.filter(img => {
+      const key = img.url.split('?')[0]; // Ignore query params for deduplication
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     // Shuffle results to mix sources
-    const shuffled = allImages.sort(() => Math.random() - 0.5);
+    const shuffled = uniqueImages.sort(() => Math.random() - 0.5);
 
     return NextResponse.json({
       images: shuffled,
       count: shuffled.length,
-      sources: sources.filter(s => results[sources.indexOf(s)]?.length > 0),
+      sources: [...new Set(shuffled.map(img => img.source))],
     });
   } catch (error) {
     console.error('Search failed:', error);
