@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 📍 Location Spy
+
+Find images of any location through time. Aggregates photos from modern sources and historical archives to show how places have changed over decades.
+
+## Features
+
+### 🔍 Multi-Source Search
+Search across 10+ image sources simultaneously:
+- **Modern:** Google, Bing, Flickr, Unsplash
+- **Real Estate:** Zillow, Redfin
+- **Historical:** Library of Congress, Wikimedia Commons, Internet Archive, NYPL
+- **Maps:** Historical maps and surveys
+
+### 📅 Timeline View
+See images arranged chronologically to visualize how a location changed over time.
+
+### 🌐 3D View
+Explore images positioned on an interactive 3D globe using Three.js.
+
+### 🎯 Geo-Search
+Search by coordinates with configurable radius (1-50 km) for precise location matching.
+
+### 📜 Historical Archives
+Automatic integration with:
+- Library of Congress digital collections
+- Internet Archive's historical photos
+- Wikimedia Commons
+- New York Public Library
+
+## Tech Stack
+
+- **Framework:** Next.js 16 (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS 4
+- **3D:** Three.js (dynamic import, client-only)
+- **APIs:** Multiple image search APIs
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Usage
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Enter an address, city, or landmark
+2. Select which sources to search
+3. Toggle geo-search for coordinate-based filtering
+4. Toggle "Photos only" to filter out icons/illustrations
+5. View results as Grid, Timeline, or 3D globe
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Search Options
 
-## Learn More
+| Option | Description |
+|--------|-------------|
+| **Photos only** | Filter out icons, logos, and illustrations |
+| **Geo-search** | Search by coordinates instead of text |
+| **Radius** | How far from coordinates to search (1-50 km) |
 
-To learn more about Next.js, take a look at the following resources:
+## Example Searches
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `Keaau, Hawaii` - See how a small town changed over decades
+- `Empire State Building, New York` - Historical construction photos
+- `1600 Pennsylvania Avenue` - Historical images of the White House
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project Structure
 
-## Deploy on Vercel
+```
+src/
+├── app/
+│   ├── page.tsx         # Main search interface
+│   └── api/
+│       └── search/      # Image search API
+├── components/
+│   ├── ImageGrid.tsx    # Grid view
+│   ├── Timeline.tsx     # Chronological view
+│   ├── View3D.tsx       # 3D globe view
+│   ├── SearchForm.tsx   # Search input
+│   └── SourceFilters.tsx
+└── lib/
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Sources
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Images are sourced from public APIs and archives:
+- Google Images API
+- Bing Image Search
+- Flickr API
+- Library of Congress API
+- Internet Archive
+- Wikimedia Commons API
+
+---
+
+*See how places change through time* 🕰️
