@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Map/globe background -->
+  <circle cx="50" cy="50" r="45" fill="#1a365d" stroke="#3b82f6" stroke-width="2"/>
+  <!-- Latitude lines -->
+  <ellipse cx="50" cy="50" rx="40" ry="15" fill="none" stroke="#3b82f6" stroke-width="1" opacity="0.5"/>
+  <ellipse cx="50" cy="50" rx="40" ry="30" fill="none" stroke="#3b82f6" stroke-width="1" opacity="0.5"/>
+  <!-- Longitude line -->
+  <line x1="50" y1="8" x2="50" y2="92" stroke="#3b82f6" stroke-width="1" opacity="0.5"/>
+  <!-- Location pin -->
+  <path d="M50 20 C35 20 25 32 25 45 C25 60 50 80 50 80 C50 80 75 60 75 45 C75 32 65 20 50 20 Z" fill="#ef4444"/>
+  <circle cx="50" cy="42" r="10" fill="white"/>
+  <!-- Camera lens in pin -->
+  <circle cx="50" cy="42" r="6" fill="#1a365d"/>
+  <circle cx="50" cy="42" r="3" fill="#3b82f6"/>
+  <!-- Timeline indicator -->
+  <rect x="15" y="85" width="70" height="6" rx="3" fill="#3b82f6" opacity="0.3"/>
+  <circle cx="25" cy="88" r="4" fill="#f59e0b"/>
+  <circle cx="50" cy="88" r="4" fill="#f59e0b"/>
+  <circle cx="75" cy="88" r="4" fill="#f59e0b"/>
+</svg>
